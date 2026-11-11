@@ -13,6 +13,8 @@ import { JobServiceService } from './job-service.service';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
 import { QuerySearchJobsDto } from './dto/query-search-jobs.dto';
+import { AuthUser } from 'src/common/auth/auth-user.decorator';
+import { AccessService } from 'src/common/auth/access.service';
 
 
 
@@ -31,7 +33,10 @@ function toNum(v: any): number | undefined {
 
 @Controller('jobs')
 export class JobServiceController {
-  constructor(private readonly jobService: JobServiceService) { }
+  constructor(
+    private readonly jobService: JobServiceService,
+    private readonly access: AccessService,
+  ) { }
 
   @Get()
   list(
@@ -81,21 +86,30 @@ export class JobServiceController {
   }
 
   @Post()
-  create(@Body() body: CreateJobDto) {
-    console.log('[REST /jobs] body recibido:', body);
-    return this.jobService.create(body); 
+  async create(@AuthUser() user: any, @Body() body: CreateJobDto) {
+    // Solo el administrador de la empresa publica vacantes a nombre de ella.
+    await this.access.assertCompanyAdmin(user, body.companyId);
+    return this.jobService.create(body);
   }
 
   @Patch(':id')
-  update(
+  async update(
+    @AuthUser() user: any,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() patch: UpdateJobDto,
   ) {
+    await this.access.assertJobOwner(user, id);
+    const anyPatch = patch as any;
+    if (anyPatch?.companyId !== undefined) {
+      // mover una vacante a otra empresa exige ser admin también de la empresa destino
+      await this.access.assertCompanyAdmin(user, anyPatch.companyId);
+    }
     return this.jobService.update(id, patch);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+  async remove(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertJobOwner(user, id);
     return this.jobService.remove(id);
   }
 }

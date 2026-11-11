@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete,
-  Param, Body, Query, ParseUUIDPipe
+  Param, Body, Query, ParseUUIDPipe, ForbiddenException,
 } from '@nestjs/common';
 import { PaymentServiceService } from './payment-service.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -9,69 +9,93 @@ import { QueryPaymentsDto } from './dto/query-payments.dto';
 import { StartReferralCheckoutDto } from './dto/start-hire-checkout.dto';
 import { AuthUser } from '../../common/auth/auth-user.decorator';
 import { Public } from '../../common/auth/public.decorator';
+import { AccessService } from '../../common/auth/access.service';
 
 @Controller('payments')
 export class PaymentServiceController {
-  constructor(private readonly service: PaymentServiceService) { }
+  constructor(
+    private readonly service: PaymentServiceService,
+    private readonly access: AccessService,
+  ) { }
 
+  /** Crear, editar o borrar pagos a mano: solo administradores de CME. */
   @Post()
-  create(@Body() dto: CreatePaymentDto) {
+  async create(@AuthUser() user: any, @Body() dto: CreatePaymentDto) {
+    await this.access.assertAdmin(user);
     return this.service.create(dto);
   }
 
   @Get()
   async list(@Query() q: QueryPaymentsDto, @AuthUser() user: any) {
-    // Normalizamos paginación
     const limit = Math.max(1, Math.min(100, Number(q.limit ?? 20)));
     const offset = Math.max(0, Number(q.offset ?? 0));
     const query: QueryPaymentsDto = { ...q, limit, offset };
+    const isAdmin = await this.access.isAdmin(user);
 
     const mineFlag =
       (typeof q.mine === 'string' ? q.mine === 'true' : !!q.mine) ||
       (!q.companyId && !q.headhunterId);
 
-    if (mineFlag) {
-      const meId = user?.id ?? null;
-
+    if (mineFlag && !isAdmin) {
       return this.service.listMine({
         meCompanyId: user?.companyId ?? null,
-        meHeadhunterId: meId,
+        meHeadhunterId: this.access.userId(user),
         query,
         tryResolveCompanyFromAdmin: true,
       });
+    }
+
+    if (!isAdmin) {
+      // filtros explícitos: solo sobre la propia empresa o sobre uno mismo como reclutador
+      if (q.headhunterId && q.headhunterId !== this.access.userId(user)) {
+        throw new ForbiddenException('not_allowed_for_other_user');
+      }
+      if (q.companyId) await this.access.assertCompanyAdmin(user, q.companyId);
     }
 
     return this.service.list(query);
   }
 
   @Get(':id')
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
-    return this.service.findOne(id);
+  async findOne(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    const payment = await this.service.findOne(id);
+    await this.access.assertPaymentParty(user, payment);
+    return payment;
   }
 
   @Get(':id/receipt')
-  async receipt(@Param('id', new ParseUUIDPipe()) id: string) {
+  async receipt(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertPaymentParty(user, await this.service.findOne(id));
     return this.service.getReceiptData(id);
   }
 
   @Patch(':id')
-  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() patch: UpdatePaymentDto) {
+  async update(
+    @AuthUser() user: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() patch: UpdatePaymentDto,
+  ) {
+    await this.access.assertAdmin(user);
     return this.service.update(id, patch);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+  async remove(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertAdmin(user);
     return this.service.remove(id);
   }
 
+  /** Solo la empresa dueña de la vacante inicia el cobro de la contratación. */
   @Post('referral/checkout')
-  async startReferralCheckout(@Body() dto: StartReferralCheckoutDto) {
+  async startReferralCheckout(@AuthUser() user: any, @Body() dto: StartReferralCheckoutDto) {
+    const ctx = await this.access.referralContext(dto.referralId);
+    await this.access.assertCompanyAdmin(user, ctx.company_id);
     return this.service.startReferralCheckout(dto);
   }
 
   @Public()
   @Post('webhook')
-  async mpWebhook(@Body() req: any, @Query('pid') pid: string) {
-    return this.service.handleMercadoPagoWebhook(req, pid);
+  async mpWebhook(@Body() body: any, @Query() query: any, @Query('pid') pid: string) {
+    return this.service.handleMercadoPagoWebhook(body, query, pid);
   }
 }

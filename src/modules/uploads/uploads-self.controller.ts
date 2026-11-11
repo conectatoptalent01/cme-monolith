@@ -1,19 +1,26 @@
 import {
   Controller,
-  Headers,
   Post,
   UploadedFile,
   UseInterceptors,
-  UnauthorizedException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UploadsService } from './uploads-service.service';
+import { AuthUser } from 'src/common/auth/auth-user.decorator';
+import { AccessService } from 'src/common/auth/access.service';
+
+/**
+ * Antes el usuario se tomaba de las cabeceras x-user-id / x-internal-gateway, que cualquiera
+ * podía falsificar para cambiar la foto de otra persona. Ahora sale del token verificado.
+ */
 
 @Controller('uploads/self')
 export class UploadsSelfController {
-  constructor(private readonly uploads: UploadsService) { }
+  constructor(
+    private readonly uploads: UploadsService,
+    private readonly access: AccessService,
+  ) { }
 
   @Post('avatar')
   @UseInterceptors(
@@ -22,19 +29,8 @@ export class UploadsSelfController {
       limits: { fileSize: 10 * 1024 * 1024 }, 
     }),
   )
-  async uploadAvatarOneShot(
-    @Headers('x-user-id') userId: string | undefined,
-    @UploadedFile() file: any,
-    @Headers('x-internal-gateway') fromGateway: string | undefined,
-  ) {
-    if (!fromGateway) {
-      throw new ForbiddenException('forbidden_origin');
-    }
-
-    if (!userId) {
-      throw new UnauthorizedException('missing_user_id');
-    }
-    return this.uploads.uploadAvatarOneShot(userId, file);
+  async uploadAvatarOneShot(@AuthUser() user: any, @UploadedFile() file: any) {
+    return this.uploads.uploadAvatarOneShot(this.access.userId(user), file);
   }
 
   @Post('cover')
@@ -44,17 +40,7 @@ export class UploadsSelfController {
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
   )
-  async uploadCoverOneShot(
-    @Headers('x-user-id') userId: string | undefined,
-    @UploadedFile() file: any,
-    @Headers('x-internal-gateway') fromGateway: string | undefined,
-  ) {
-    if (!fromGateway) {
-      throw new ForbiddenException('forbidden_origin');
-    }
-    if (!userId) {
-      throw new UnauthorizedException('missing_user_id');
-    }
-    return this.uploads.uploadCoverOneShot(userId, file);
+  async uploadCoverOneShot(@AuthUser() user: any, @UploadedFile() file: any) {
+    return this.uploads.uploadCoverOneShot(this.access.userId(user), file);
   }
 }

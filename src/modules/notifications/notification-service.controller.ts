@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, BadReq
 import { NotificationsService } from './notification-service.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { QueryNotificationsDto } from './dto/query-notifications.dto';
+import { AuthUser } from 'src/common/auth/auth-user.decorator';
+import { AccessService } from 'src/common/auth/access.service';
 
 function normalizeCreateBody(raw: any): CreateNotificationDto {
   const src = raw?.input ?? raw ?? {};
@@ -33,7 +35,10 @@ function normalizeQuery(q: any): QueryNotificationsDto {
 
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly service: NotificationsService) { }
+  constructor(
+    private readonly service: NotificationsService,
+    private readonly access: AccessService,
+  ) { }
 
   @Post()
   create(@Body() raw: any) {
@@ -41,24 +46,30 @@ export class NotificationsController {
     return this.service.create(dto);
   }
 
+  /** Cada usuario ve solo sus notificaciones (un admin puede filtrar por cualquiera). */
   @Get()
-  list(@Query() q: any) {
+  async list(@AuthUser() user: any, @Query() q: any) {
     const nq = normalizeQuery(q);
+    if (!(await this.access.isAdmin(user))) nq.userId = this.access.userId(user);
     return this.service.list(nq);
   }
 
   @Get(':id')
-  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
+  async findOne(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertSelfOrAdmin(user, await this.access.notificationOwner(id));
     return this.service.findOne(id);
   }
 
   @Patch(':id/read')
-  markRead(@Param('id', new ParseUUIDPipe()) id: string) {
+  async markRead(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertSelfOrAdmin(user, await this.access.notificationOwner(id));
     return this.service.markRead(id);
   }
 
+  /** Reenviar por email: solo admin (el frontend no lo usa). */
   @Post(':id/dispatch')
-  dispatch(@Param('id', new ParseUUIDPipe()) id: string) {
+  async dispatch(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertAdmin(user);
     return this.service.dispatchOneById(id);
   }
 }

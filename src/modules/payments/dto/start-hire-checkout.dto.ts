@@ -1,15 +1,14 @@
-import { IsUUID, IsNumber, IsPositive, IsString, IsOptional, Min, Max } from 'class-validator';
+import { IsUUID, IsOptional } from 'class-validator';
 
+/**
+ * Solo se necesita el referido. El monto, la moneda y el % del reclutador los calcula el servidor.
+ * Los campos amount / currency / referralPercent se aceptan por compatibilidad pero se IGNORAN.
+ */
 export class StartReferralCheckoutDto {
   @IsUUID()
   referralId!: string;
 
-  @IsNumber() @IsPositive()
-  amount!: number;
-
-  @IsString()
-  currency!: string; // 'COP', 'PAB', etc.
-
-  @IsOptional() @Min(0) @Max(1)
-  referralPercent?: number; // default via env REFERRAL_PERCENT
+  @IsOptional() amount?: unknown;
+  @IsOptional() currency?: unknown;
+  @IsOptional() referralPercent?: unknown;
 }

@@ -36,7 +36,7 @@ export class PaymentServiceController {
       (typeof q.mine === 'string' ? q.mine === 'true' : !!q.mine) ||
       (!q.companyId && !q.headhunterId);
 
-    if (mineFlag && !isAdmin) {
+    if (mineFlag) {
       return this.service.listMine({
         meCompanyId: user?.companyId ?? null,
         meHeadhunterId: this.access.userId(user),

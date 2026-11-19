@@ -110,7 +110,7 @@ export class ReferralsService {
     }
   }
 
-  async list(q: QueryReferralsDto) {
+  async list(q: QueryReferralsDto, opts: { includeInvitee?: boolean } = {}) {
     const where: string[] = [];
     const params: any[] = [];
     let i = 1;
@@ -125,6 +125,7 @@ export class ReferralsService {
 
     const sql = `
       SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at
+             ${opts.includeInvitee ? ', invitee_first_name, invitee_last_name, invite_expires_at' : ''}
       FROM public.referrals
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY created_at DESC

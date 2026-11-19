@@ -62,7 +62,8 @@ export class ReferralsController {
     const othersFilter =
       (q.headhunterId && q.headhunterId !== me) || (q.candidateId && q.candidateId !== me);
     if ((ownFilter && !othersFilter) || ownsJob || (await this.access.isAdmin(user))) {
-      return this.service.list(q);
+      // quien refiere ve a quién invitó (nombre y vencimiento; nunca el teléfono)
+      return this.service.list(q, { includeInvitee: q.headhunterId === me && !othersFilter });
     }
     throw new ForbiddenException('filter_by_own_referrals_or_own_job');
   }

@@ -11,6 +11,7 @@ import { UploadsModule } from './modules/uploads/uploads-service.module';
 import { AuthModule } from './common/auth/auth.module';
 import { CompanyServiceModule } from './modules/companies/company-service.module';
 import { HealthModule } from './common/health/health.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -26,6 +27,7 @@ import { AppService } from './app.service';
     PaymentServiceModule,
     NotificationServiceModule,
     ReferralServiceModule,
+    InvitationsModule,
     UploadsModule,
     HealthModule,
   ],

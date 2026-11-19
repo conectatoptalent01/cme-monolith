@@ -3,6 +3,7 @@ import {
   UseGuards, ValidationPipe, ParseUUIDPipe
 } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
+import { SELF_ASSIGNABLE_ROLES } from '../auth-service.service';
 import { SearchProfilesDto } from '../dto/search-profiles.dto';
 import { HttpAuthGuard } from 'src/common/auth/http-auth.guard';
 import { AuthUser } from '../../../common/auth/auth-user.decorator';
@@ -18,6 +19,22 @@ const bodyPipe = new ValidationPipe({
   whitelist: true,
   forbidNonWhitelisted: false,
 });
+
+
+/**
+ * Lo que un usuario NO puede cambiarse a sí mismo: estado (activo/baneado), reputación
+ * y el rol 'admin'. Antes PATCH /profiles/me aceptaba role='admin'.
+ */
+function sanitizeSelfProfile<T extends Record<string, any>>(body: T): T {
+  const copy: any = { ...(body ?? {}) };
+  delete copy.status;
+  delete copy.reputation_score;
+  delete copy.id;
+  if (copy.role !== undefined && !(SELF_ASSIGNABLE_ROLES as readonly string[]).includes(copy.role)) {
+    delete copy.role;
+  }
+  return copy;
+}
 
 @Controller('profiles')
 export class ProfilesController {
@@ -52,18 +69,24 @@ export class ProfilesController {
       reputation_score?: number;
     }
   ) {
-    const payload = { email: user.email, ...body };
+    const payload = { ...sanitizeSelfProfile(body), email: user.email };
     return this.svc.upsert(user.id, payload);
   }
 
   @UseGuards(HttpAuthGuard)
   @Patch('me')
   patchMe(@AuthUser() user: any, @Body() patch: Record<string, any>) {
-    return this.svc.updatePartial(user.id, patch);
+    return this.svc.updatePartial(user.id, sanitizeSelfProfile(patch));
   }
 
+  /** El documento de identidad solo lo ve su dueño. */
   @Get(':id')
-  getById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.svc.findOne(id);
+  async getById(@AuthUser() user: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const profile: any = await this.svc.findOne(id);
+    if (profile && user?.id !== id) {
+      delete profile.document_type;
+      delete profile.document_id;
+    }
+    return profile;
   }
 }

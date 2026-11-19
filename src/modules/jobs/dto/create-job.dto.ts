@@ -23,8 +23,8 @@ export class CreateJobDto {
   description!: string;
 
   @IsString()
-  @IsIn(['full-time', 'part-time', 'services-agreement'])
-  employmentType!: 'full-time' | 'part-time' | 'services-agreement';
+  @IsIn(['full-time', 'part-time', 'services-agreement', 'one-off', 'consulting'])
+  employmentType!: 'full-time' | 'part-time' | 'services-agreement' | 'one-off' | 'consulting';
 
   @IsString()
   @IsIn(['remote', 'on_site', 'hybrid'])
@@ -43,10 +43,13 @@ export class CreateJobDto {
   @IsOptional()
   skills?: string[];
 
+  /**
+   * Monto de la posición. Obligatorio: con él se calcula el fee de contratación
+   * (ver src/modules/payments/fee-schedule.ts).
+   */
   @IsNumber()
   @IsPositive()
-  @IsOptional()
-  salary?: number;
+  salary!: number;
 
   @IsString()
   @IsOptional()

@@ -6,7 +6,7 @@ export class QuerySearchJobsDto {
   q?: string;
 
   @IsOptional() @IsString()
-  employmentType?: 'full-time'|'part-time'|'services-agreement';
+  employmentType?: 'full-time'|'part-time'|'services-agreement'|'one-off'|'consulting';
 
   @IsOptional() @IsString()
   locationType?: 'remote'|'on_site'|'hybrid';

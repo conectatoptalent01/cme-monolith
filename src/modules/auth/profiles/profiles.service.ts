@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_POOL } from 'src/common/db/pg.constants';
 import { SearchProfilesDto } from '../dto/search-profiles.dto';
@@ -95,7 +95,7 @@ export class ProfilesService {
             ELSE jsonb_build_array(education)
           END,
         '[]'::jsonb) AS education,
-        cv_url, reputation_score, created_at, updated_at
+        cv_url, reputation_score, document_type, document_id, created_at, updated_at
     `;
 
     const params = [
@@ -141,7 +141,7 @@ export class ProfilesService {
             ELSE jsonb_build_array(education)
           END,
         '[]'::jsonb) AS education,
-        cv_url, reputation_score, created_at, updated_at
+        cv_url, reputation_score, document_type, document_id, created_at, updated_at
       FROM public.profiles
       WHERE id = $1
       `,
@@ -156,7 +156,17 @@ export class ProfilesService {
       'email', 'full_name', 'phone', 'role', 'status',
       'profile_picture', 'cover_photo', 'occupation', 'about_me',
       'skills', 'experience', 'education', 'cv_url', 'reputation_score',
+      'document_type', 'document_id',
     ];
+
+    if (patch.document_type !== undefined && patch.document_type !== null && patch.document_type !== ''
+        && !['cedula', 'passport'].includes(String(patch.document_type))) {
+      throw new BadRequestException('invalid_document_type');
+    }
+    if (patch.document_id !== undefined && patch.document_id !== null
+        && String(patch.document_id).trim().length > 30) {
+      throw new BadRequestException('invalid_document_id');
+    }
 
     const sets: string[] = [];
     const params: any[] = [];
@@ -207,7 +217,7 @@ export class ProfilesService {
             ELSE jsonb_build_array(education)
           END, '[]'::jsonb
         ) AS education,
-        cv_url, reputation_score, created_at, updated_at
+        cv_url, reputation_score, document_type, document_id, created_at, updated_at
       FROM public.profiles
       WHERE id = $1
       `,
@@ -239,7 +249,7 @@ export class ProfilesService {
           ELSE jsonb_build_array(education)
         END, '[]'::jsonb
       ) AS education,
-      cv_url, reputation_score, created_at, updated_at
+      cv_url, reputation_score, document_type, document_id, created_at, updated_at
   `;
     const { rows } = await this.pool.query(sql, params);
     if (!rows[0]) throw new NotFoundException('profile_not_found');

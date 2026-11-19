@@ -32,21 +32,18 @@ export class ApplicationsController {
   }
 
   /**
-   * Listar por candidato: solo el propio candidato, la empresa dueña de la vacante filtrada o un admin.
-   * Listar solo por vacante: sigue abierto a usuarios con sesión (se restringe en la Fase 3,
-   * cuando se rehaga el flujo de referidos y privacidad).
+   * Las postulaciones son privadas: solo las ven el propio candidato,
+   * la empresa dueña de la vacante y un admin.
    */
   @Get()
   async list(@AuthUser() user: any, @Query() q: QueryApplicationsDto) {
-    if (q.candidateId && q.candidateId !== this.access.userId(user)) {
-      const ownsJob = q.jobOfferId
-        ? await this.access.isCompanyAdmin(user, await this.access.companyOfJob(q.jobOfferId))
-        : false;
-      if (!ownsJob && !(await this.access.isAdmin(user))) {
-        throw new ForbiddenException('not_allowed_for_other_user');
-      }
-    }
-    return this.service.list(q);
+    const me = this.access.userId(user);
+    if (q.candidateId === me) return this.service.list(q);
+    const ownsJob = q.jobOfferId
+      ? await this.access.isCompanyAdmin(user, await this.access.companyOfJob(q.jobOfferId))
+      : false;
+    if (ownsJob || (await this.access.isAdmin(user))) return this.service.list(q);
+    throw new ForbiddenException('applications_are_private');
   }
 
   @Get(':id')

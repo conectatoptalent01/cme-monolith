@@ -17,11 +17,12 @@ import { PaymentServiceController } from '../../modules/payments/payment-service
 import { NotificationsController } from '../../modules/notifications/notification-service.controller';
 import { ReferralsController } from '../../modules/referrals/referral-service.controller';
 import { UploadsSelfController } from '../../modules/uploads/uploads-self.controller';
+import { InvitationsController } from '../../modules/invitations/invitations.controller';
 
 const CONTROLLERS = [
   AppController, HealthController, AuthController, ProfilesController, CompaniesController,
   JobServiceController, ApplicationsController, PaymentServiceController,
-  NotificationsController, ReferralsController, UploadsSelfController,
+  NotificationsController, ReferralsController, UploadsSelfController, InvitationsController,
 ];
 
 /** Las ÚNICAS rutas que deben responder sin login. Agregar una aquí debe ser una decisión consciente. */
@@ -33,6 +34,9 @@ const EXPECTED_PUBLIC = [
   'POST /auth/signup-direct',
   'POST /auth/oauth',
   'POST /payments/webhook',
+  // Fase 3: el enlace de WhatsApp se abre sin cuenta; aceptar sí exige sesión.
+  'GET /invitations/:token',
+  'POST /invitations/:token/decline',
 ].sort();
 
 const METHOD_NAMES: Record<number, string> = { 0: 'GET', 1: 'POST', 2: 'PUT', 3: 'DELETE', 4: 'PATCH' };

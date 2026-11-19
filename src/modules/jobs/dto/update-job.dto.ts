@@ -16,9 +16,9 @@ export class UpdateJobDto {
   @IsOptional()
   description?: string;
 
-  @IsIn(['full-time', 'part-time', 'services-agreement'])
+  @IsIn(['full-time', 'part-time', 'services-agreement', 'one-off', 'consulting'])
   @IsOptional()
-  employmentType?: 'full-time' | 'part-time' | 'services-agreement';
+  employmentType?: 'full-time' | 'part-time' | 'services-agreement' | 'one-off' | 'consulting';
 
   @IsIn(['remote', 'on_site', 'hybrid'])
   @IsOptional()

@@ -47,12 +47,30 @@ export class ReferralsController {
   }
 
   /**
-   * Listado general (por vacante / código): sigue abierto a usuarios con sesión porque
-   * el flujo actual de "canjear código" lo necesita. Se restringe en la Fase 3.
+   * Listado: cada quien ve lo suyo.
+   *  - quien refiere: filtrando por su propio headhunterId
+   *  - el candidato: filtrando por su propio candidateId
+   *  - la empresa: filtrando por una vacante suya
    */
   @Get()
-  list(@Query() q: QueryReferralsDto) {
-    return this.service.list(q);
+  async list(@AuthUser() user: any, @Query() q: QueryReferralsDto) {
+    const me = this.access.userId(user);
+    const ownFilter = q.headhunterId === me || q.candidateId === me;
+    const ownsJob = q.jobOfferId
+      ? await this.access.isCompanyAdmin(user, await this.access.companyOfJob(q.jobOfferId))
+      : false;
+    const othersFilter =
+      (q.headhunterId && q.headhunterId !== me) || (q.candidateId && q.candidateId !== me);
+    if ((ownFilter && !othersFilter) || ownsJob || (await this.access.isAdmin(user))) {
+      return this.service.list(q);
+    }
+    throw new ForbiddenException('filter_by_own_referrals_or_own_job');
+  }
+
+  /** Canjear un código de referido (flujo anterior a la invitación por WhatsApp). */
+  @Post('claim')
+  claim(@AuthUser() user: any, @Body() body: { code: string }) {
+    return this.service.claimByCode(body?.code, this.access.userId(user));
   }
 
   @Get('by-headhunter/:headhunterId')

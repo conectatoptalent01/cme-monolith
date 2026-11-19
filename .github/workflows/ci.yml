@@ -10,6 +10,21 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+
+    # Base PostgreSQL de pruebas para las pruebas de integración (se crea y se borra en cada corrida).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cme_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,5 +34,7 @@ jobs:
       - run: npm ci
       - name: Compilar
         run: npm run build
-      - name: Pruebas automáticas
+      - name: Pruebas automáticas (incluye integración con PostgreSQL)
         run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/cme_test

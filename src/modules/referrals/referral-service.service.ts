@@ -145,7 +145,9 @@ export class ReferralsService {
     const offset = q.offset ?? 0;
 
     const sql = `
-      SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at
+      SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at,
+             -- solo quien refiere ve a quién invitó (se borra al aceptar, rechazar o vencer)
+             invitee_first_name, invitee_last_name, invite_expires_at
       FROM public.referrals
       WHERE headhunter_id = $1
       ORDER BY created_at DESC
@@ -181,7 +183,9 @@ export class ReferralsService {
   async findOne(id: string) {
     try {
       const { rows } = await this.pool.query(
-        `SELECT * FROM public.referrals WHERE id = $1`,
+        `SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at,
+                invitee_first_name, invitee_last_name, invite_expires_at
+           FROM public.referrals WHERE id = $1`,
         [id],
       );
       if (!rows[0]) throw new NotFoundException('referral_not_found');
@@ -270,5 +274,27 @@ export class ReferralsService {
       if (err instanceof NotFoundException) throw err;
       throw new InternalServerErrorException('Unexpected error deleting referral');
     }
+  }
+
+  /**
+   * El candidato "canjea" un código de referido (flujo anterior a las invitaciones por WhatsApp).
+   * Solo funciona sobre un referido libre y nunca para quien lo creó.
+   */
+  async claimByCode(code: string, userId: string) {
+    const normalized = String(code ?? '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{6}$/.test(normalized)) throw new BadRequestException('invalid_referral_code');
+
+    const { rows } = await this.pool.query(
+      `UPDATE public.referrals
+          SET candidate_id = $2, status = 'accepted_by_candidate'::referral_status, updated_at = now()
+        WHERE referral_code = $1
+          AND candidate_id IS NULL
+          AND headhunter_id <> $2
+          AND status = 'submitted'::referral_status
+      RETURNING id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at`,
+      [normalized, userId],
+    );
+    if (!rows[0]) throw new NotFoundException('referral_code_not_available');
+    return rows[0];
   }
 }

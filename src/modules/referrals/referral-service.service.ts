@@ -280,7 +280,7 @@ export class ReferralsService {
    * El candidato "canjea" un código de referido (flujo anterior a las invitaciones por WhatsApp).
    * Solo funciona sobre un referido libre y nunca para quien lo creó.
    */
-  async claimByCode(code: string, userId: string) {
+  async claimByCode(code: string, userId: string, jobOfferId?: string | null) {
     const normalized = String(code ?? '').trim().toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(normalized)) throw new BadRequestException('invalid_referral_code');
 
@@ -291,8 +291,9 @@ export class ReferralsService {
           AND candidate_id IS NULL
           AND headhunter_id <> $2
           AND status = 'submitted'::referral_status
+          AND ($3::uuid IS NULL OR job_offer_id = $3::uuid)
       RETURNING id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at`,
-      [normalized, userId],
+      [normalized, userId, jobOfferId ?? null],
     );
     if (!rows[0]) throw new NotFoundException('referral_code_not_available');
     return rows[0];

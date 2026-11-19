@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { InvitationsService, hashToken } from '../modules/invitations/invitations.service';
 import { WhatsAppSender } from '../modules/invitations/whatsapp.sender';
+import { ReferralsService } from '../modules/referrals/referral-service.service';
 
 const DB = process.env.TEST_DATABASE_URL;
 const d = DB ? describe : describe.skip;
@@ -167,5 +168,18 @@ d('Invitaciones por WhatsApp (integración con PostgreSQL)', () => {
     expect(await svc.expirePending()).toBeGreaterThanOrEqual(1);
     const { rows: [ref] } = await pool.query(`SELECT status, invitee_phone FROM referrals WHERE id = $1`, [r.referralId]);
     expect(ref).toEqual({ status: 'expired', invitee_phone: null });
+  });
+
+  it('canjear un código: solo en su vacante, solo si está libre y nunca quien lo creó', async () => {
+    const refs = new ReferralsService(pool as any);
+    await pool.query(
+      `INSERT INTO referrals (headhunter_id, job_offer_id, referral_code) VALUES ($1, $2, 'ABC234')`,
+      [ids.referidor, jobId]);
+    const otherJob = '99999999-9999-4999-8999-999999999999';
+    await expect(refs.claimByCode('abc234', ids.otro, otherJob)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(refs.claimByCode('ABC234', ids.referidor, jobId)).rejects.toBeInstanceOf(NotFoundException);
+    const r = await refs.claimByCode('abc234', ids.otro, jobId);
+    expect(r).toEqual(expect.objectContaining({ candidate_id: ids.otro, status: 'accepted_by_candidate' }));
+    await expect(refs.claimByCode('ABC234', ids.ana, jobId)).rejects.toBeInstanceOf(NotFoundException);
   });
 });

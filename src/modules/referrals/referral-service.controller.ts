@@ -69,8 +69,9 @@ export class ReferralsController {
 
   /** Canjear un código de referido (flujo anterior a la invitación por WhatsApp). */
   @Post('claim')
-  claim(@AuthUser() user: any, @Body() body: { code: string }) {
-    return this.service.claimByCode(body?.code, this.access.userId(user));
+  claim(@AuthUser() user: any, @Body() body: { code: string; jobOfferId?: string }) {
+    const job = body?.jobOfferId && /^[0-9a-f-]{36}$/i.test(body.jobOfferId) ? body.jobOfferId : null;
+    return this.service.claimByCode(body?.code, this.access.userId(user), job);
   }
 
   @Get('by-headhunter/:headhunterId')

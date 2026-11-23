@@ -12,6 +12,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomBytes } from 'crypto';
 import { Pool, PoolClient } from 'pg';
 import { PG_POOL } from '../../common/db/pg.constants';
+import { insertSystemNotification } from '../../common/db/notify';
 import { maskPhone, normalizePhone } from './phone';
 import { WhatsAppSender } from './whatsapp.sender';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
@@ -337,18 +338,12 @@ export class InvitationsService {
     return rows[0];
   }
 
-  private async notify(
+  private notify(
     db: Pool | PoolClient,
     userId: string | null | undefined,
     n: { title: string; message: string; relatedId: string | null },
   ) {
-    if (!userId) return;
-    await db.query(
-      `INSERT INTO public.notifications (user_id, title, message, notification_type, channel, status, related_id)
-       VALUES ($1, $2, $3, 'recommendation'::notification_type, 'system'::notification_channel,
-               'sent'::notification_status, $4)`,
-      [userId, n.title.slice(0, 180), n.message.slice(0, 5000), n.relatedId],
-    );
+    return insertSystemNotification(db, userId, n);
   }
 
   private async uniqueReferralCode(): Promise<string> {

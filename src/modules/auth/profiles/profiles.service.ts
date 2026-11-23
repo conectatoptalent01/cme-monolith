@@ -141,7 +141,7 @@ export class ProfilesService {
             ELSE jsonb_build_array(education)
           END,
         '[]'::jsonb) AS education,
-        cv_url, reputation_score, document_type, document_id, created_at, updated_at
+        cv_url, reputation_score, partner_status, partner_since, document_type, document_id, created_at, updated_at
       FROM public.profiles
       WHERE id = $1
       `,

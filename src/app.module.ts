@@ -12,6 +12,8 @@ import { AuthModule } from './common/auth/auth.module';
 import { CompanyServiceModule } from './modules/companies/company-service.module';
 import { HealthModule } from './common/health/health.module';
 import { InvitationsModule } from './modules/invitations/invitations.module';
+import { ReputationModule } from './modules/reputation/reputation.module';
+import { WorkReferencesModule } from './modules/work-references/work-references.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -28,6 +30,8 @@ import { AppService } from './app.service';
     NotificationServiceModule,
     ReferralServiceModule,
     InvitationsModule,
+    ReputationModule,
+    WorkReferencesModule,
     UploadsModule,
     HealthModule,
   ],

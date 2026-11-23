@@ -45,6 +45,22 @@ export function buildInvitePreview(m: Omit<ReferralInviteMessage, 'to' | 'token'
  *   {{1}} nombre del invitado · {{2}} quien recomienda · {{3}} vacante · {{4}} empresa
  * y un botón de tipo URL dinámica: https://<dominio>/invitacion/{{1}}  (el sufijo es el token).
  */
+export interface ReferenceRequestMessage {
+  to: string;
+  referenceFirstName: string;
+  candidateName: string;
+  companyName: string;
+  token: string;
+  confirmUrl: string;
+}
+
+export function buildReferencePreview(m: Omit<ReferenceRequestMessage, 'to' | 'token'>): string {
+  return (
+    `Hola ${m.referenceFirstName}, ${m.candidateName} te indicó como referencia laboral de su ` +
+    `trabajo en ${m.companyName}. ¿Nos ayudas a confirmarlo? Toma menos de un minuto: ${m.confirmUrl}`
+  );
+}
+
 @Injectable()
 export class WhatsAppSender {
   private readonly log = new Logger('WhatsApp');
@@ -53,11 +69,44 @@ export class WhatsAppSender {
     return process.env.WHATSAPP_MODE === 'meta' ? 'meta' : 'simulated';
   }
 
-  async sendReferralInvite(m: ReferralInviteMessage): Promise<SendResult> {
-    const previewText = buildInvitePreview(m);
+  /** Invitación a un referido: plantilla con 4 variables + botón /invitacion/{token}. */
+  sendReferralInvite(m: ReferralInviteMessage): Promise<SendResult> {
+    return this.sendTemplate({
+      to: m.to,
+      template: process.env.WHATSAPP_TEMPLATE_REFERRAL || 'cme_invitacion_referido',
+      bodyParams: [m.inviteeFirstName, m.referrerName, m.jobTitle, m.companyName],
+      buttonSuffix: m.token,
+      previewText: buildInvitePreview(m),
+    });
+  }
+
+  /**
+   * Pedido de confirmación a una referencia laboral.
+   * Plantilla (Utility, español) con 3 variables:
+   *   {{1}} nombre de la referencia · {{2}} candidato · {{3}} empresa donde trabajaron
+   * y botón URL dinámico: https://<dominio>/referencia/{{1}}
+   */
+  sendReferenceRequest(m: ReferenceRequestMessage): Promise<SendResult> {
+    return this.sendTemplate({
+      to: m.to,
+      template: process.env.WHATSAPP_TEMPLATE_REFERENCE || 'cme_validacion_referencia',
+      bodyParams: [m.referenceFirstName, m.candidateName, m.companyName],
+      buttonSuffix: m.token,
+      previewText: buildReferencePreview(m),
+    });
+  }
+
+  private async sendTemplate(t: {
+    to: string;
+    template: string;
+    bodyParams: string[];
+    buttonSuffix: string;
+    previewText: string;
+  }): Promise<SendResult> {
+    const { previewText } = t;
 
     if (this.mode === 'simulated') {
-      this.log.log(`[SIMULADO] invitación de referido preparada (no se envió).`);
+      this.log.log(`[SIMULADO] mensaje "${t.template}" preparado (no se envió).`);
       return { mode: 'simulated', status: 'simulated', previewText };
     }
 
@@ -70,27 +119,14 @@ export class WhatsAppSender {
     const version = process.env.WHATSAPP_GRAPH_VERSION || 'v21.0';
     const body = {
       messaging_product: 'whatsapp',
-      to: m.to.replace(/^\+/, ''),
+      to: t.to.replace(/^\+/, ''),
       type: 'template',
       template: {
-        name: process.env.WHATSAPP_TEMPLATE_REFERRAL || 'cme_invitacion_referido',
+        name: t.template,
         language: { code: process.env.WHATSAPP_TEMPLATE_LANG || 'es' },
         components: [
-          {
-            type: 'body',
-            parameters: [
-              { type: 'text', text: m.inviteeFirstName },
-              { type: 'text', text: m.referrerName },
-              { type: 'text', text: m.jobTitle },
-              { type: 'text', text: m.companyName },
-            ],
-          },
-          {
-            type: 'button',
-            sub_type: 'url',
-            index: '0',
-            parameters: [{ type: 'text', text: m.token }],
-          },
+          { type: 'body', parameters: t.bodyParams.map((text) => ({ type: 'text', text })) },
+          { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: t.buttonSuffix }] },
         ],
       },
     };
@@ -104,15 +140,10 @@ export class WhatsAppSender {
       const json: any = await res.json().catch(() => ({}));
       if (!res.ok) {
         const error = json?.error?.message || `http_${res.status}`;
-        this.log.warn(`Envío fallido: ${error}`);
+        this.log.warn(`Envío fallido (${t.template}): ${error}`);
         return { mode: 'meta', status: 'failed', error, previewText };
       }
-      return {
-        mode: 'meta',
-        status: 'sent',
-        providerMessageId: json?.messages?.[0]?.id ?? null,
-        previewText,
-      };
+      return { mode: 'meta', status: 'sent', providerMessageId: json?.messages?.[0]?.id ?? null, previewText };
     } catch (e: any) {
       return { mode: 'meta', status: 'failed', error: e?.message || 'network_error', previewText };
     }

@@ -22,6 +22,7 @@ CREATE TABLE public.profiles (
   role public.user_role DEFAULT 'candidate',
   status public.user_status DEFAULT 'active',
   cv_url text,
+  reputation_score numeric,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -29,7 +30,8 @@ CREATE TABLE public.profiles (
 CREATE TABLE public.companies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
-  admin_id uuid REFERENCES public.profiles(id)
+  admin_id uuid REFERENCES public.profiles(id),
+  company_rating numeric
 );
 
 CREATE TABLE public.job_offers (

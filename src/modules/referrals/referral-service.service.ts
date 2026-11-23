@@ -125,7 +125,8 @@ export class ReferralsService {
 
     const sql = `
       SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at
-             ${opts.includeInvitee ? ', invitee_first_name, invitee_last_name, invite_expires_at' : ''}
+             ${opts.includeInvitee ? ', invitee_first_name, invitee_last_name, invite_expires_at' : ''},
+             (SELECT rr.stars FROM public.referral_ratings rr WHERE rr.referral_id = public.referrals.id) AS rating_stars
       FROM public.referrals
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY created_at DESC
@@ -148,7 +149,8 @@ export class ReferralsService {
     const sql = `
       SELECT id, headhunter_id, candidate_id, job_offer_id, status, referral_code, created_at, updated_at,
              -- solo quien refiere ve a quién invitó (se borra al aceptar, rechazar o vencer)
-             invitee_first_name, invitee_last_name, invite_expires_at
+             invitee_first_name, invitee_last_name, invite_expires_at,
+             (SELECT rr.stars FROM public.referral_ratings rr WHERE rr.referral_id = public.referrals.id) AS rating_stars
       FROM public.referrals
       WHERE headhunter_id = $1
       ORDER BY created_at DESC

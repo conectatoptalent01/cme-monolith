@@ -4,7 +4,6 @@ import { AuthController } from './auth-service.controller';
 import { AuthService } from './auth-service.service';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesService } from './profiles/profiles.service';
-import { DebugController } from './debug.controller';
 import { AuthModule } from 'src/common/auth/auth.module';
 import { DbModule } from 'src/common/db/db.module';
 
@@ -17,7 +16,7 @@ import { DbModule } from 'src/common/db/db.module';
     AuthModule,
     DbModule,
   ],
-  controllers: [AuthController, ProfilesController, DebugController],
+  controllers: [AuthController, ProfilesController],
   providers: [AuthService, ProfilesService],
 })
 export class AuthServiceModule { }

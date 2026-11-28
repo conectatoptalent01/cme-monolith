@@ -13,6 +13,7 @@ import { QueryPaymentsDto } from './dto/query-payments.dto';
 import { MercadoPagoConfig, Preference, Payment as MPPayment } from 'mercadopago';
 import { StartReferralCheckoutDto } from './dto/start-hire-checkout.dto';
 import { PG_POOL } from 'src/common/db/pg.constants';
+import { calculateHiringFee, RECRUITER_SHARE } from './fee-schedule';
 
 type ListInput = QueryPaymentsDto & { limit: number; offset: number };
 
@@ -29,7 +30,7 @@ export class PaymentServiceService {
     return v;
   })();
 
-  private readonly REF_PCT = Number(process.env.REFERRAL_PERCENT ?? '0.2');
+  private readonly REF_PCT = Number(process.env.REFERRAL_PERCENT ?? String(RECRUITER_SHARE));
 
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {
     const accessToken = (process.env.MP_ACCESS_TOKEN || '').trim();
@@ -280,25 +281,28 @@ export class PaymentServiceService {
     return { payment, company: payment.company_id, job: payment.job_offer_id, headhunter: payment.headhunter_id };
   }
 
-  /** Checkout desde referralId */
+  /**
+   * Checkout desde referralId.
+   * El monto lo calcula SIEMPRE el servidor a partir de la tabla de tarifas y del monto
+   * de la posición publicado en la vacante. Lo que envíe el navegador se ignora.
+   */
   async startReferralCheckout(input: StartReferralCheckoutDto) {
     const ref = await this._getReferralContext(input.referralId);
     if (ref.status === 'hired') throw new BadRequestException('referral_already_hired');
+
+    const positionAmount = Number(ref.job_salary);
+    if (!Number.isFinite(positionAmount) || positionAmount <= 0) {
+      throw new BadRequestException('job_salary_required_to_calculate_fee');
+    }
+    const { fee, tier } = calculateHiringFee(positionAmount, this.REF_PCT);
+    const currency = String(ref.job_currency || 'USD').toUpperCase();
 
     const { rows: [payment] } = await this.pool.query(
       `INSERT INTO public.payments
        (job_offer_id, headhunter_id, company_id, amount, currency, direction, status)
        VALUES ($1,$2,$3,$4,$5,$6::payment_direction,$7::payment_status)
        RETURNING *`,
-      [
-        ref.job_offer_id,
-        null,
-        ref.company_id,
-        input.amount,
-        input.currency ?? 'COP',
-        'in',
-        'pending',
-      ]
+      [ref.job_offer_id, null, ref.company_id, fee, currency, 'in', 'pending'],
     );
 
     const back_urls = this.buildBackUrls(payment.id);
@@ -308,14 +312,14 @@ export class PaymentServiceService {
         body: {
           items: [{
             id: payment.id,
-            title: 'Hiring referral fee',
+            title: `Fee de contratación CME (${tier})`,
             quantity: 1,
-            unit_price: Number(input.amount),
-            currency_id: input.currency ?? 'COP',
+            unit_price: fee,
+            currency_id: currency,
           }],
           back_urls,
-          // auto_return: 'approved',
           notification_url: `${this.API_BASE}/payments/webhook?pid=${payment.id}`,
+          external_reference: payment.id,
           metadata: {
             paymentId: payment.id,
             referralId: input.referralId,
@@ -323,13 +327,12 @@ export class PaymentServiceService {
             companyId: ref.company_id,
             candidateId: ref.candidate_id,
             headhunterId: ref.headhunter_id,
-            referralPercent: String(input.referralPercent ?? this.REF_PCT),
           },
-        }
+        },
       });
       const initPoint = (pref as any)?.init_point || (pref as any)?.sandbox_init_point;
       if (!initPoint) throw new Error('MercadoPago: init_point not returned');
-      return { checkoutUrl: initPoint, paymentId: payment.id };
+      return { checkoutUrl: initPoint, paymentId: payment.id, amount: fee, currency };
     } catch (e: any) {
       console.error('[MP PREF ERROR]', {
         message: e?.message, status: e?.status, error: e?.error, cause: e?.cause, name: e?.name,
@@ -340,7 +343,8 @@ export class PaymentServiceService {
 
   private async _getReferralContext(referralId: string) {
     const sql = `
-      SELECT r.id, r.status, r.candidate_id, r.job_offer_id, r.headhunter_id, j.company_id
+      SELECT r.id, r.status, r.candidate_id, r.job_offer_id, r.headhunter_id, j.company_id,
+             j.salary AS job_salary, j.currency AS job_currency
       FROM public.referrals r
       JOIN public.job_offers j ON j.id = r.job_offer_id
       WHERE r.id = $1
@@ -351,60 +355,75 @@ export class PaymentServiceService {
     return row;
   }
 
-  async handleMercadoPagoWebhook(req: any, pid: string) {
-    const event = req.body;
-    if (event?.type === 'payment' && event?.data?.id) {
-      try {
-        const resp = await this.payments.get({ id: event.data.id });
-        const status = (resp as any)?.status;
+  /**
+   * Webhook de Mercado Pago.
+   * - El aviso puede llegar en el body ({ type, data: { id } }) o en la query (?type=payment&data.id=… / ?topic=payment&id=…).
+   * - El estado se consulta SIEMPRE a la API de Mercado Pago (no se confía en el aviso).
+   * - El pago de MP debe corresponder a nuestro registro (external_reference / metadata) y cubrir el monto.
+   * - Es idempotente: un aviso repetido no duplica nada.
+   */
+  async handleMercadoPagoWebhook(body: any, query: any, pid: string) {
+    const type = body?.type ?? body?.topic ?? query?.type ?? query?.topic;
+    const mpPaymentId = body?.data?.id ?? query?.['data.id'] ?? query?.data?.id ?? query?.id;
+    if (type !== 'payment' || !mpPaymentId || !pid) return { ok: true, ignored: true };
 
-        if (status === 'approved') {
-          const { rows: [paid] } = await this.pool.query(
-            `UPDATE public.payments
-             SET status='succeeded'::payment_status, psp_payment_id=$1, updated_at=now()
-             WHERE id=$2
-             RETURNING *`,
-            [String((resp as any)?.id), pid]
-          );
-          if (!paid) throw new NotFoundException('payment_in_not_found');
+    let resp: any;
+    try {
+      resp = await this.payments.get({ id: String(mpPaymentId) });
+    } catch (e: any) {
+      console.error('[MP PAYMENTS.GET ERROR]', {
+        message: e?.message, status: e?.status, error: e?.error, cause: e?.cause, name: e?.name,
+      });
+      throw new BadRequestException(e?.message || 'mercadopago_get_error');
+    }
 
-          const md = (resp as any)?.metadata || {};
-          if (!md?.referralId) return { ok: true };
+    if (resp?.status !== 'approved') return { ok: true, status: resp?.status ?? null };
 
-          const ref = await this._getReferralContext(md.referralId);
+    // Mercado Pago devuelve las claves de metadata en snake_case.
+    const md = resp?.metadata || {};
+    const mdPaymentId = md.payment_id ?? md.paymentId ?? resp?.external_reference ?? null;
+    const referralId = md.referral_id ?? md.referralId ?? null;
+    if (String(mdPaymentId) !== String(pid)) {
+      throw new BadRequestException('webhook_payment_mismatch');
+    }
 
-          await this.pool.query(
-            `UPDATE public.referrals
-             SET status='hired'::referral_status, updated_at=now()
-             WHERE id=$1`,
-            [md.referralId]
-          );
+    const { rows: [current] } = await this.pool.query(
+      `SELECT id, amount, status FROM public.payments WHERE id = $1 AND direction = 'in'::payment_direction`,
+      [pid],
+    );
+    if (!current) throw new NotFoundException('payment_in_not_found');
+    if (current.status === 'succeeded') return { ok: true, alreadyProcessed: true };
 
-          const outExists = await this._existsOutPayment(ref.headhunter_id, ref.job_offer_id, ref.company_id);
-          if (!outExists) {
-            const refAmount =
-              Number((resp as any)?.transaction_amount) * Number(md.referralPercent ?? this.REF_PCT);
-            await this.pool.query(
-              `INSERT INTO public.payments
-               (job_offer_id, headhunter_id, company_id, amount, currency, direction, status)
-               VALUES ($1,$2,$3,$4,$5,$6::payment_direction,$7::payment_status)`,
-              [
-                ref.job_offer_id,
-                ref.headhunter_id,
-                ref.company_id,
-                refAmount,
-                (resp as any)?.currency_id || 'COP',
-                'out',
-                'pending',
-              ]
-            );
-          }
-        }
-      } catch (e: any) {
-        console.error('[MP PAYMENTS.GET ERROR]', {
-          message: e?.message, status: e?.status, error: e?.error, cause: e?.cause, name: e?.name,
-        });
-        throw new BadRequestException(e?.message || 'mercadopago_get_error');
+    const paid = Number(resp?.transaction_amount);
+    if (!(paid >= Number(current.amount) - 0.01)) {
+      throw new BadRequestException('webhook_amount_mismatch');
+    }
+
+    await this.pool.query(
+      `UPDATE public.payments
+          SET status = 'succeeded'::payment_status, psp_payment_id = $1, updated_at = now()
+        WHERE id = $2`,
+      [String(resp?.id), pid],
+    );
+
+    if (!referralId) return { ok: true };
+    const ref = await this._getReferralContext(String(referralId));
+
+    await this.pool.query(
+      `UPDATE public.referrals SET status = 'hired'::referral_status, updated_at = now() WHERE id = $1`,
+      [ref.id],
+    );
+
+    if (ref.headhunter_id) {
+      const outExists = await this._existsOutPayment(ref.headhunter_id, ref.job_offer_id, ref.company_id);
+      if (!outExists) {
+        const payout = Math.round(Number(current.amount) * this.REF_PCT * 100) / 100;
+        await this.pool.query(
+          `INSERT INTO public.payments
+           (job_offer_id, headhunter_id, company_id, amount, currency, direction, status)
+           VALUES ($1,$2,$3,$4,$5,$6::payment_direction,$7::payment_status)`,
+          [ref.job_offer_id, ref.headhunter_id, ref.company_id, payout, resp?.currency_id || 'USD', 'out', 'pending'],
+        );
       }
     }
     return { ok: true };

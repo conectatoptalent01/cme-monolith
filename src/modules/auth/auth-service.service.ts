@@ -14,6 +14,16 @@ import { Inject } from '@nestjs/common';
 import { PG_POOL } from 'src/common/db/pg.constants';
 
 type UserRole = 'candidate' | 'company_admin' | 'headhunter' | 'admin';
+
+/** Roles que un usuario puede elegir al registrarse. 'admin' solo se asigna a mano en la base de datos. */
+export const SELF_ASSIGNABLE_ROLES = ['candidate', 'company_admin', 'headhunter'] as const;
+
+/** Devuelve el rol pedido si es auto-asignable; cualquier otro valor (incluido 'admin') cae a 'candidate'. */
+export function selfAssignableRole(role?: string | null): UserRole {
+  return (SELF_ASSIGNABLE_ROLES as readonly string[]).includes(String(role ?? ''))
+    ? (role as UserRole)
+    : 'candidate';
+}
 type UserStatus = 'active' | 'inactive' | 'banned' | 'pending';
 
 @Injectable()
@@ -143,7 +153,11 @@ export class AuthService {
         SET email = EXCLUDED.email,
             full_name = EXCLUDED.full_name,
             phone = EXCLUDED.phone,
-            role = EXCLUDED.role,
+            -- un usuario nunca puede asignarse 'admin', y un admin existente no pierde su rol por un upsert
+            role = CASE
+              WHEN public.profiles.role = 'admin' THEN public.profiles.role
+              ELSE EXCLUDED.role
+            END,
             status = EXCLUDED.status,
             profile_picture = CASE
               WHEN EXCLUDED.profile_picture IS NOT NULL THEN EXCLUDED.profile_picture
@@ -157,7 +171,7 @@ export class AuthService {
       payload.email,
       payload.fullName ?? '',
       this.normalizePhone(payload.phone),
-      payload.role ?? ('candidate' as UserRole),
+      selfAssignableRole(payload.role),
       payload.status ?? ('active' as UserStatus),
       (payload.profilePicture ?? '').trim(),
     ];

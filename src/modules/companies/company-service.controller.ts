@@ -10,14 +10,22 @@ import {
   ParseUUIDPipe,
   ValidationPipe,
   NotFoundException,
-  UseGuards,
-  Req,
 } from '@nestjs/common';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { SearchCompaniesDto } from './dto/search-companies.dto';
 import { CompaniesService } from './company-service.service';
-import { HttpAuthGuard } from 'src/common/auth/http-auth.guard';
+import { AuthUser } from 'src/common/auth/auth-user.decorator';
+import { AccessService } from 'src/common/auth/access.service';
+
+/** Campos que solo un administrador de CME puede fijar (verificación, plan, rating). */
+const ADMIN_ONLY_FIELDS = ['companyRating', 'boolVerified', 'verifiedAt', 'subscriptionPlan'] as const;
+
+function stripAdminOnly<T extends Record<string, any>>(dto: T): T {
+  const copy: any = { ...dto };
+  for (const k of ADMIN_ONLY_FIELDS) delete copy[k];
+  return copy;
+}
 
 const bodyPipe = new ValidationPipe({
   transform: true,
@@ -33,7 +41,10 @@ const queryPipe = new ValidationPipe({
 
 @Controller('companies')
 export class CompaniesController {
-  constructor(private readonly service: CompaniesService) { }
+  constructor(
+    private readonly service: CompaniesService,
+    private readonly access: AccessService,
+  ) { }
 
   @Get()
   list(@Query('limit') limit = 50, @Query('offset') offset = 0) {
@@ -53,21 +64,27 @@ export class CompaniesController {
     return row;
   }
 
-  @UseGuards(HttpAuthGuard)
   @Post()
-  async create(@Req() req: any, @Body(bodyPipe) dto: CreateCompanyDto) {
-    console.log("[CompaniesController:create] dto recibido >>>", dto);
-    return this.service.create(dto);
+  async create(@AuthUser() user: any, @Body(bodyPipe) dto: CreateCompanyDto) {
+    if (await this.access.isAdmin(user)) return this.service.create(dto);
+    // Un usuario normal solo puede crear empresas a su propio nombre.
+    return this.service.create({ ...stripAdminOnly(dto), adminId: this.access.userId(user) });
   }
 
-  @UseGuards(HttpAuthGuard)
   @Patch(':id')
-  update(@Param('id', new ParseUUIDPipe()) id: string, @Body(bodyPipe) dto: UpdateCompanyDto) {
-    return this.service.update(id, dto);
+  async update(
+    @AuthUser() user: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(bodyPipe) dto: UpdateCompanyDto,
+  ) {
+    await this.access.assertCompanyAdmin(user, id);
+    const patch = (await this.access.isAdmin(user)) ? dto : stripAdminOnly(dto);
+    return this.service.update(id, patch);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+  async remove(@AuthUser() user: any, @Param('id', new ParseUUIDPipe()) id: string) {
+    await this.access.assertCompanyAdmin(user, id);
     return this.service.remove(id);
   }
 
